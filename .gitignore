@@ -1,2 +1,4 @@
-# nodemodules
 node_modules
+.env
+# ingore my server folder
+server

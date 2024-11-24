@@ -22,8 +22,9 @@ const peers = io.of("/mediasoup");
 let worker;
 let router;
 let producerTransport;
-let consumerTranport;
+let consumerTransport;
 let producer;
+let consumer;
 
 const createWorker = async () => {
   worker = await mediasoup.createWorker({
@@ -71,19 +72,19 @@ peers.on("connection", async (socket) => {
   router = await worker.createRouter({ mediaCodecs }); // Each space has its own router
   socket.emit("router-rtp-capabilities", router.rtpCapabilities);
 
-  // Step 3 : Create Transport and send it to client (Used by client as producer)
+  // Step 3 : Create Transport and send it to client (Used by client as producer or consumer)
   socket.on("createWebRtcTransport", async ({ sender }, callback) => {
     console.log("Is it a sender?", sender);
     if (sender) {
       producerTransport = await createWebRtcTransport(callback);
     } else {
-      consumerTranport = await createWebRtcTransport(callback);
+      consumerTransport = await createWebRtcTransport(callback);
     }
   });
 
   // Receive dtlsParameters from client Producer
   socket.on("transport-connect", async ({ dtlsParameters }) => {
-    console.log("DTLS parameters : ", dtlsParameters);
+    console.log("DTLS parameters from client producer : ", dtlsParameters);
     await producerTransport.connect({ dtlsParameters });
   });
 
@@ -113,6 +114,55 @@ peers.on("connection", async (socket) => {
     }
   );
 
+  // For Consumer
+  socket.on("transport-recv-connect", async ({ dtlsParameters }) => {
+    console.log("DTLS parameters from client consumer : ", dtlsParameters);
+    await consumerTransport.connect({ dtlsParameters });
+  });
+
+  socket.on("consume", async ({ rtpCapabilities }, callback) => {
+    try {
+      if (
+        router.canConsume({
+          producerId: producer.id,
+          rtpCapabilities,
+        })
+      ) {
+        consumer = await consumerTransport.consume({
+          producerId: producer.id,
+          rtpCapabilities,
+          paused: true,
+        });
+
+        consumer.on("transportclose", () => {
+          console.log("Transport closed for this Consumer");
+          consumer.close();
+        });
+
+        const params = {
+          id: consumer.id,
+          producerId: producer.id,
+          kind: consumer.kind,
+          rtpParameters: consumer.rtpParameters,
+        };
+
+        callback({ params });
+      }
+    } catch (error) {
+      console.log(error.message);
+      callback({
+        params: {
+          error: error,
+        },
+      });
+    }
+  });
+
+  socket.on("consumer-resume", async () => {
+    console.log("Consumer resumed");
+    await consumer.resume();
+  });
+
   socket.on("disconnect", () => {
     console.log("Socket-client disconnected:", {
       socketId: socket.id,
@@ -125,7 +175,8 @@ const createWebRtcTransport = async (callback) => {
     const webRtcTransport_options = {
       listenIps: [
         {
-          ip: "127.0.0.1",
+          ip: "0.0.0.0",
+          announcedIp: "127.0.0.1",
         },
       ],
       enableUdp: true,
