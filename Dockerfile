@@ -19,12 +19,13 @@ ENV MEDIASOUP_SKIP_WORKER_PREBUILT_DOWNLOAD="true"
 ENV PYTHON=python3
 
 RUN npm install mediasoup@3 \
-    && npm install
+    && npm install \
+    && npm install -g nodemon
 
 COPY . .
 
 # Expose ports (adjust the RTC ports range as needed)
 EXPOSE 8000
-EXPOSE 2000-2020
+EXPOSE 2000-2100
 
 CMD ["npm", "run", "dev"]
