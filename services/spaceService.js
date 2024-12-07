@@ -4,6 +4,7 @@ const createSpace = async (worker, spaces, spaceId, socketId) => {
   try {
     let router1;
     let peers = [];
+    console.log('In Create Space event : spaceId', spaceId);
     console.log("Does space exist ?", spaces[spaceId]);
     if (spaces[spaceId]) {
       router1 = spaces[spaceId].router;

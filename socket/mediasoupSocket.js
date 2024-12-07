@@ -17,6 +17,7 @@ const initializeMediasoupSocket = (connections, worker) => {
 
     // Step 2 : Listen for sync-space event
     socket.on("sync-space", async ({ spaceId }, callback) => {
+      console.log("Sync-space event triggered for spaceId", spaceId);
       const router1 = await createSpace(worker, spaces, spaceId, socket.id);
 
       peers[socket.id] = {

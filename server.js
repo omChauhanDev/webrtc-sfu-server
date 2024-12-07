@@ -5,14 +5,22 @@ const mediasoup = require("mediasoup");
 const { createWorker } = require("./services/workerService");
 const { initializeMediasoupSocket } = require("./socket/mediasoupSocket");
 
-const httpServer = createServer();
+// const httpServer = createServer();
 
-httpServer.listen(8000, () => {
+// for prod
+const options = {
+  key: fs.readFileSync("/home/ubuntu/ssl/selfsigned.key"),
+  cert: fs.readFileSync("/home/ubuntu/ssl/selfsigned.crt"),
+};
+
+const httpsServer = createServer(options);
+
+httpsServer.listen(8000, () => {
   console.log("HTTP server running on port 8000");
 });
 
 // Mounting Socket.io on our HTTP server
-const io = new Server(httpServer, {
+const io = new Server(httpsServer, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
