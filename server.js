@@ -1,6 +1,7 @@
 const { createServer } = require("http");
 const { Server } = require("socket.io");
 const mediasoup = require("mediasoup");
+const fs = require("fs");
 
 const { createWorker } = require("./services/workerService");
 const { initializeMediasoupSocket } = require("./socket/mediasoupSocket");
