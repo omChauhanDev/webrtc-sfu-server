@@ -1,4 +1,4 @@
-const { createServer } = require("http");
+const { createServer } = require("https");
 const { Server } = require("socket.io");
 const mediasoup = require("mediasoup");
 const fs = require("fs");
@@ -6,18 +6,19 @@ const fs = require("fs");
 const { createWorker } = require("./services/workerService");
 const { initializeMediasoupSocket } = require("./socket/mediasoupSocket");
 
+// for dev
 // const httpServer = createServer();
 
 // for prod
 const options = {
-  key: fs.readFileSync("/home/ubuntu/ssl/selfsigned.key"),
-  cert: fs.readFileSync("/home/ubuntu/ssl/selfsigned.crt"),
+  key: fs.readFileSync("./ssl/webserver.key"),
+  cert: fs.readFileSync("./ssl/webserver.crt"),
 };
 
 const httpsServer = createServer(options);
 
 httpsServer.listen(8000, () => {
-  console.log("HTTP server running on port 8000");
+  console.log("HTTPS server running on port 8000");
 });
 
 // Mounting Socket.io on our HTTP server
