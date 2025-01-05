@@ -16,12 +16,13 @@ const initializeMediasoupSocket = (connections, worker) => {
     });
 
     // Step 2 : Listen for sync-space event
-    socket.on("sync-space", async ({ spaceId }, callback) => {
+    socket.on("sync-space", async ({ spaceId, userData }, callback) => {
       console.log("Sync-space event triggered for spaceId", spaceId);
       const router1 = await createSpace(worker, spaces, spaceId, socket.id);
 
       peers[socket.id] = {
         socket,
+        userData,
         spaceId,
         transports: [],
         producers: [],
@@ -36,9 +37,18 @@ const initializeMediasoupSocket = (connections, worker) => {
       const isProducerExist = producers.some(
         (producer) => producer.spaceId === spaceId
       );
+      const allMembersInSpace = spaces[spaceId].peers;
+      const allMembersData = allMembersInSpace.map((member) => {
+        return {
+          socketId: member,
+          userData: peers[member].userData,
+        };
+      });
+      informExistingMembers(spaceId, socket.id, "member-joined");
       callback({
         rtpCapabilities,
         isProducerExist,
+        allMembersData,
       });
     });
 
@@ -129,7 +139,13 @@ const initializeMediasoupSocket = (connections, worker) => {
           producerData.spaceId === spaceId &&
           producerData.socketId !== socket.id
         ) {
-          producersList = [...producersList, producerData.producer.id];
+          producersList = [
+            ...producersList,
+            {
+              producerId: producerData.producer.id,
+              producerPersonalData: peers[producerData.socketId].userData,
+            },
+          ];
         }
       });
       console.log("Existing producers in this space", producersList.length);
@@ -143,21 +159,47 @@ const initializeMediasoupSocket = (connections, worker) => {
       return producerTransport.transport;
     };
 
-    const informExistingMembers = (spaceId, socketId, producerId) => {
-      console.log(
-        "Informing all peers of this space about new producer",
+    const informExistingMembers = (
+      spaceId,
+      socketId,
+      about,
+      producerId = null
+    ) => {
+      console.log("Inform Existing peers called with params", {
         spaceId,
         socketId,
-        producerId
-      );
+        about,
+        producerId,
+      });
       // tell all peers in this space that a new producer has joined
+      if (!spaces[spaceId]) {
+        return;
+      }
       const existingMembers = spaces[spaceId].peers.filter(
         (peer) => peer !== socketId
       );
-      console.log("Existing members in this space", existingMembers);
-      existingMembers.forEach((member) => {
-        socket.to(member).emit("new-producer-joined", { producerId });
-      });
+      if (about === "member-left") {
+        existingMembers.forEach((member) => {
+          socket.to(member).emit("member-left", { socketId });
+        });
+        return;
+      }
+      const memberPersonalData = peers[socketId].userData;
+      if (about === "producer") {
+        existingMembers.forEach((member) => {
+          socket.to(member).emit("new-producer-joined", {
+            producerId,
+            socketId,
+            memberPersonalData,
+          });
+        });
+      } else if (about === "member-joined") {
+        existingMembers.forEach((member) => {
+          socket
+            .to(member)
+            .emit("new-member-joined", { socketId, memberPersonalData });
+        });
+      }
     };
 
     // Receive dtlsParameters from client Producer
@@ -179,7 +221,17 @@ const initializeMediasoupSocket = (connections, worker) => {
         const { spaceId } = peers[socket.id];
         addProducer(producer, spaceId);
 
-        informExistingMembers(spaceId, socket.id, producer.id);
+        // Update userData on server
+        console.log("Updating userData on server");
+        console.log("Producer kind", producer.kind);
+        if (producer.kind === "video") {
+          peers[socket.id].userData.isVideoOn = true;
+          console.log("Is video on", peers[socket.id].userData.isVideoOn);
+        } else if (producer.kind === "audio") {
+          peers[socket.id].userData.isAudioOn = true;
+          console.log("Is audio on", peers[socket.id].userData.isAudioOn);
+        }
+        informExistingMembers(spaceId, socket.id, "producer", producer.id);
 
         console.log(
           "Producer Id :",
@@ -232,7 +284,7 @@ const initializeMediasoupSocket = (connections, worker) => {
               transportData.transport.id === serverConsumerTransportId
           ).transport;
 
-          console.log("On Consume evet");
+          console.log("On Consume event");
           console.log("Router Id", router.id);
           console.log("Producer Id for consuming", remoteProducerId);
 
@@ -266,8 +318,13 @@ const initializeMediasoupSocket = (connections, worker) => {
             });
 
             consumer.on("producerclose", () => {
-              console.log("Producer closed for this Consumer");
-              socket.emit("producer-closed-connection", { remoteProducerId });
+              console.log(
+                "Producer closed for this Consumer produerId",
+                remoteProducerId
+              );
+              socket.emit("producer-closed-connection", {
+                remoteProducerId,
+              });
 
               consumerTransport.close();
               transports = transports.filter(
@@ -325,6 +382,68 @@ const initializeMediasoupSocket = (connections, worker) => {
       return items;
     };
 
+    // For video pause/resume
+    socket.on("producer-pause", async ({ producerId }) => {
+      const producer = producers.find((p) => p.producer.id === producerId);
+      const kind = producer.producer.kind;
+      console.log("Producer Pause triggered for kind", kind);
+      // Update on server
+      if (kind === "video") {
+        peers[socket.id].userData.isVideoOn = false;
+      } else if (kind === "audio") {
+        peers[socket.id].userData.isAudioOn = false;
+      }
+      if (producer) {
+        await producer.producer.pause();
+        console.log(
+          `Paused this producer with id: ${producer.producer.id} and kind: ${producer.producer.kind}`
+        );
+        // tell all peers in this space that an existing producer is paused
+        const { spaceId } = peers[socket.id];
+        const existingMembers = spaces[spaceId].peers.filter(
+          (peer) => peer !== socket.id
+        );
+        console.log("Existing members in this space", existingMembers);
+        existingMembers.forEach((member) => {
+          socket.to(member).emit("producer-pause", {
+            producerId,
+            socketId: socket.id,
+            isTrackOn: false,
+          });
+        });
+      }
+    });
+
+    socket.on("producer-resume", async ({ producerId }) => {
+      const producer = producers.find((p) => p.producer.id === producerId);
+      const kind = producer.producer.kind;
+      // Update on server
+      if (kind === "video") {
+        peers[socket.id].userData.isVideoOn = false;
+      } else if (kind === "audio") {
+        peers[socket.id].userData.isAudioOn = false;
+      }
+      if (producer) {
+        await producer.producer.resume();
+        console.log(
+          `Resumed this producer with id: ${producer.producer.id} and kind: ${producer.producer.kind}`
+        );
+        // tell all peers in this space that an existing producer is resumed
+        const { spaceId } = peers[socket.id];
+        const existingMembers = spaces[spaceId].peers.filter(
+          (peer) => peer !== socket.id
+        );
+        console.log("Existing members in this space", existingMembers);
+        existingMembers.forEach((member) => {
+          socket.to(member).emit("producer-resume", {
+            producerId,
+            socketId: socket.id,
+            isTrackOn: true,
+          });
+        });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log("Socket-client disconnected:", {
         socketId: socket.id,
@@ -347,6 +466,8 @@ const initializeMediasoupSocket = (connections, worker) => {
           spaces[spaceId].router.close();
           delete spaces[spaceId];
         }
+        console.log("This peer left the space", socket.id);
+        informExistingMembers(spaceId, socket.id, "member-left");
       } else {
         console.log(`No peer found for socket ID: ${socket.id}`);
       }
