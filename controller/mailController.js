@@ -5,6 +5,9 @@ exports.sendMail = async (req, res) => {
   try {
     const { email, senderFullName, inviteLink } = req.body;
 
+    // URL encode the invite link for use in GET parameter
+    const encodedInviteLink = encodeURIComponent(inviteLink);
+
     const htmlContent = `
       <!DOCTYPE html>
       <html>
@@ -63,10 +66,9 @@ exports.sendMail = async (req, res) => {
               <p><strong>${senderFullName}</strong> has invited you to connect on SyncSpace.</p>
               
               <center>
-                <form action="https://localhost:8000/api/mail/join-space" method="POST">
-                  <input type="hidden" name="inviteLink" value="${inviteLink}" />
-                  <button type="submit" class="button">Join Space</button>
-                </form>
+                <a href="https://localhost:8000/api/mail/join-space?invite=${encodedInviteLink}" class="button">
+                  Join Space
+                </a>
               </center>
             </div>
             <div class="footer">
@@ -100,9 +102,16 @@ exports.sendMail = async (req, res) => {
 
 exports.handleInvitationClick = async (req, res) => {
   try {
-    const { inviteLink } = req.body;
+    const inviteLink = req.query.invite;
 
-    // Serve the HTML page with the inviteLink embedded
+    if (!inviteLink) {
+      return res.status(400).send("Invalid invitation link");
+    }
+
+    // Decode the invite link before embedding it in the HTML
+    const decodedInviteLink = decodeURIComponent(inviteLink);
+
+    // Return the same HTML page but with the decoded invite link
     res.send(`
       <!DOCTYPE html>
       <html lang="en">
@@ -159,7 +168,7 @@ exports.handleInvitationClick = async (req, res) => {
           <script>
               let cameraEnabled = false;
               let micEnabled = false;
-              const inviteLink = "${inviteLink}";
+              const inviteLink = "${decodedInviteLink}";
 
               function toggleCamera() {
                   cameraEnabled = !cameraEnabled;
